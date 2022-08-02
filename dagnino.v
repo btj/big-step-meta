@@ -24,6 +24,27 @@ CoInductive diverges: config -> Prop :=
   diverges pc ->
   diverges c.
 
+Inductive diverges_rule: config -> config -> Prop :=
+| diverges_rule_intro ps0 pc pr ps1 c r:
+  is_rule (ps0 ++ ((pc, pr) :: ps1)) c r ->
+  Forall (fun pc_pr => terminates (fst pc_pr) (snd pc_pr)) ps0 ->
+  diverges_rule pc c.
+
+Lemma diverges_lemma(P: config -> Prop):
+  (forall c, P c -> exists pc, P pc /\ diverges_rule pc c) ->
+  (forall c, P c -> diverges c).
+Proof.
+  intro H.
+  cofix Hcofix.
+  intros.
+  apply H in H0.
+  destruct H0 as [pc [? ?]].
+  inversion H1; clear H1; subst.
+  apply (diverges_intro ps0 pc pr ps1 c r); try assumption.
+  apply Hcofix.
+  assumption.
+Qed.
+
 Definition rule_prefix: Type := list (config * result) * config.
 
 Definition state: Type := config * option result * list rule_prefix.
@@ -365,7 +386,7 @@ Proof.
       apply H0.
 Qed.
 
-Lemma trace_remove_context_suffix trace c0 or0 c k0 k:
+Lemma trace_remove_context_suffix {trace c0 or0 c k0 k}:
   (forall i, step (trace i) (trace (S i))) ->
   trace 0 = (c0, or0, k0 ++ k) ->
   last (c0::map snd k0) c = c ->
@@ -451,6 +472,16 @@ Inductive rule_prefix_lt: rule_prefix -> rule_prefix -> Prop :=
 Parameter rule_prefix_lt_wf: well_founded rule_prefix_lt.
 
 Require Export Classical.
+
+CoInductive stream: Type := | scons(x: list nat)(s: stream).
+
+CoFixpoint lists(n: nat): stream :=
+  
+    (fix iter(i: nat)(l: list nat): stream :=
+    match i with
+      O => scons l (lists n)
+    | S i => iter i (i::l)
+    end) n [].
 
 Theorem step_diverges c trace:
   (forall i, step (trace i) (trace (S i))) ->
@@ -544,4 +575,11 @@ Proof.
     + simpl.
       congruence.
   - apply diverges_intro with (1:=H0) (2:=H1).
-    
+    destruct (trace_remove_context_suffix (c0:=pc) (or0:=None) (k:=[(ps1, c)]) (c:=pc) (k0:=[]) H2) as [trace' [? ?]]. {
+      assumption.
+    } {
+      reflexivity.
+    } { assumption. }
+    apply Hcofix with (trace:=trace'); assumption.
+Qed.
+
