@@ -287,6 +287,154 @@ Proof.
   assumption.
 Qed.
 
+Require Import Lia.
+
+Lemma firstn_app_all_l{A}(l1 l2: list A):
+  firstn (length (l1 ++ l2) - length l2) (l1 ++ l2) = l1.
+Proof.
+  rewrite app_length.
+  assert (length l1 + length l2 - length l2 = length l1). lia. rewrite H.
+  rewrite firstn_app.
+  rewrite firstn_all.
+  assert (length l1 - length l1 = 0). lia. rewrite H0.
+  rewrite firstn_O.
+  apply app_nil_r.
+Qed.
+
+Lemma step_remove_context_suffix {c0 or0 c k0 k c1 or1 k1_}:
+  step (c0, or0, k0 ++ k) (c1, or1, k1_) ->
+  last (c0::map snd k0) c = c ->
+  (~ exists r, (c0, or0, k0) = (c, Some r, [])) ->
+  exists k1,
+  k1_ = k1 ++ k /\
+  step (c0, or0, k0) (c1, or1, k1) /\
+  last (c1::map snd k1) c = c.
+Proof.
+  intros.
+  inversion H; clear H; subst.
+  - exists k0.
+    split. {
+      reflexivity.
+    }
+    split. {
+      apply step_ax; assumption.
+    }
+    assumption.
+  - exists (([], c0) :: k0).
+    split. {
+      reflexivity.
+    }
+    split. {
+      eapply step_enter; eassumption.
+    }
+    simpl.
+    apply H0.
+  - destruct k0.
+    + elim H1.
+      exists pr1.
+      simpl in H0.
+      subst.
+      reflexivity.
+    + simpl in H5.
+      injection H5; clear H5; intros; subst.
+      exists ((ps1 ++ [(c0, pr1)], c2)::k0).
+      split. {
+        reflexivity.
+      }
+      split. {
+        eapply step_next; eassumption.
+      }
+      simpl.
+      apply H0.
+  - destruct k0.
+    + simpl in H0.
+      subst.
+      elim H1.
+      exists pr.
+      reflexivity.
+    + simpl in H5.
+      injection H5; clear H5; intros; subst.
+      exists k0.
+      split. {
+        reflexivity.
+      }
+      split. {
+        apply step_exit.
+        assumption.
+      }
+      apply H0.
+Qed.
+
+Lemma trace_remove_context_suffix trace c0 or0 c k0 k:
+  (forall i, step (trace i) (trace (S i))) ->
+  trace 0 = (c0, or0, k0 ++ k) ->
+  last (c0::map snd k0) c = c ->
+  ~ (exists i r, trace i = (c, Some r, k)) ->
+  exists trace',
+  trace' 0 = (c0, or0, k0) /\
+  (forall i, step (trace' i) (trace' (S i))).
+Proof.
+  intros.
+  exists (fun i => match trace i with (ci, ori, ki) => (ci, ori, firstn (length ki - length k) ki) end).
+  split.
+  - rewrite H0.
+    rewrite firstn_app_all_l.
+    reflexivity.
+  - assert (forall i, match trace i with (ci, ori, ki) => exists ki0, ki = ki0 ++ k /\ last (ci::map snd ki0) c = c end). {
+      induction i.
+      - rewrite H0.
+        exists k0.
+        split. { reflexivity. }
+        apply H1.
+      - pose proof (H i).
+        assert (~ exists r, trace i = (c, Some r, k)). {
+          intro.
+          elim H2.
+          exists i.
+          apply H4.
+        }
+        destruct (trace i) as [[ci ori] ki].
+        destruct (trace (S i)) as [[cSi orSi] kSi].
+        destruct IHi as [ki0 [? ?]].
+        subst.
+        assert (~ exists r, (ci, ori, ki0) = (c, Some r, [])). {
+          intro.
+          elim H4.
+          destruct H5 as [r ?].
+          exists r.
+          injection H5; clear H5; intros; subst.
+          reflexivity.
+        }
+        destruct (step_remove_context_suffix H3 H6 H5) as [kSi0 [? [? ?]]].
+        exists kSi0. tauto.
+    }
+    intro i.
+    pose proof (H3 i).
+    pose proof (H i).
+    assert (~ exists r, trace i = (c, Some r, k)). {
+      intro.
+      elim H2.
+      exists i.
+      apply H6.
+    }
+    destruct (trace i) as [[ci ori] ki].
+    destruct (trace (S i)) as [[cSi orSi] kSi].
+    destruct H4 as [ki0 [? ?]].
+    subst.
+    assert (~ exists r, (ci, ori, ki0) = (c, Some r, [])). {
+      intro.
+      elim H6.
+      destruct H4 as [r ?].
+      exists r.
+      injection H4; clear H4; intros; subst.
+      reflexivity.
+    }
+    destruct (step_remove_context_suffix H5 H7 H4) as [kSi0 [? [? ?]]].
+    subst.
+    rewrite ! firstn_app_all_l.
+    assumption.
+Qed.
+
 Inductive is_rule_prefix: rule_prefix -> Prop :=
 | is_rule_prefix_intro c r ps1 ps2:
   is_rule (ps1 ++ ps2) c r ->
@@ -302,73 +450,98 @@ Inductive rule_prefix_lt: rule_prefix -> rule_prefix -> Prop :=
 
 Parameter rule_prefix_lt_wf: well_founded rule_prefix_lt.
 
-CoInductive div{A}(R: A -> A -> Prop): A -> Type :=
-| div_intro x y:
-  R x y ->
-  div R y ->
-  div R x.
+Require Export Classical.
 
-Inductive context_ends(k: list rule_prefix): nat -> forall c1 or1 k1, div step (c1, or1, k1) -> Prop :=
-| context_ends_zero c1 or1 k1 Hdiv:
-  (forall k0, k1 <> k0 ++ k) ->
-  context_ends k O c1 or1 k1 Hdiv
-| context_end_succ c1 or1 k1 c2 or2 k2 Hdiv
-
-forever_context_intro c1 or1 k1 c2 or2 k2 (Hstep: step (c1, or1, k1 ++ k) (c2, or2, k2 ++ k)) (Hdiv: div step (c2, or2, k2 ++ k)):
-  forever_context k c2 or2 k2 Hdiv ->
-  forever_context k c1 or1 k1 (div_intro step (c1, or1, k1 ++ k) (c2, or2, k2 ++ k) Hstep Hdiv).
-
-Lemma step_remove_context k c1 or1 k1 c2 or2 k2:
-  step (c1, or1, k1 ++ k) (c2, or2, k2 ++ k) ->
-  step (c1, or1, k1) (c2, or2, k2).
-Proof.
-  intros.
-  inversion H; clear H; subst.
-  - apply app_inv_tail in H6.
-    subst.
-    apply step_ax.
-    assumption.
-  - apply (app_inv_tail (([], c1)::k1) k2 k) in H6.
-
-Lemma remove_context k c1 or1 k1
-  (Hdiv: div step (c1, or1, k1 ++ k))
-  (Hforever_context: forever_context k c1 or1 k1 Hdiv):
-  div step (c1, or1, k1).
-Proof.
-  destruct Hforever_context.
-  econstructor.
-  
-
-Lemma step_diverges_lemma:
-  forall prefix ps1 pc pr ps2 c r,
-  prefix = (ps1, c) ->
-  is_rule (ps1 ++ ((pc, pr) :: ps2)) c r ->
-  Forall (fun pc_pr => terminates (fst pc_pr) (snd pc_pr)) ps1 ->
-  div step (pc, None, [(ps1, c)]) ->
+Theorem step_diverges c trace:
+  (forall i, step (trace i) (trace (S i))) ->
+  trace 0 = (c, None, []) ->
   diverges c.
 Proof.
-  intro prefix.
+  revert c trace.
+  cofix Hcofix.
+  intros.
+  pose proof (H 0).
+  rewrite H0 in H1.
+  inversion H1; clear H1; subst. {
+    pose proof (H 1).
+    rewrite <- H5 in H1.
+    inversion H1; clear H1; subst.
+  }
   apply (well_founded_ind rule_prefix_lt_wf (fun prefix =>
     forall ps1 pc pr ps2 c r,
     prefix = (ps1, c) ->
     is_rule (ps1 ++ ((pc, pr) :: ps2)) c r ->
     Forall (fun pc_pr => terminates (fst pc_pr) (snd pc_pr)) ps1 ->
-    div step (pc, None, [(ps1, c)]) ->
-    diverges c)).
+    forall trace,
+    (forall i, step (trace i) (trace (S i))) ->
+    trace O = (pc, None, [(ps1, c)]) ->
+    diverges c)) with (trace:=fun i => trace (S i)) (ps1:=[]) (pc:=pc) (pr:=pr) (r:=r) (ps2:=ps) (a:=([], c)); try tauto.
+  2:{ constructor. }
+  2:{ intros; apply H. }
+  2:{ rewrite <- H5. reflexivity. }
+  clear c trace H H0 pc pr ps r H3 H5.
   intros prefix1 Hind.
   intros.
   subst.
-  
-
-Theorem step_diverges c:
-  div step (c, None, []) ->
-  diverges c.
-Proof.
-  intros.
-  inversion H; clear H; subst.
-  inversion H0; clear H0; subst.
-  - (* step_ax *)
-    inversion H1; clear H1; subst.
-    inversion H; clear H; subst.
-  - (* step_enter *)
-
+  destruct (classic (exists i pr, trace i = (pc, Some pr, [(ps1, c)]))).
+  - destruct H as [i [pri Hi]].
+    assert (Hstate_inv0: state_inv (trace 0)). {
+      rewrite H3.
+      constructor; try tauto.
+      constructor; [|constructor].
+      apply H1.
+    }
+    assert (Hstate_inv: state_inv (trace i)). {
+      clear H3 Hi.
+      revert trace H2 Hstate_inv0.
+      revert i.
+      induction i.
+      - tauto.
+      - intros.
+        apply IHi in Hstate_inv0.
+        pose proof (H2 i).
+        apply step_inv with (1:=H) (2:=Hstate_inv0).
+        apply H2.
+    }
+    pose proof (H2 i).
+    inversion H; clear H; subst; try congruence.
+    2:{
+      rewrite Hi in H4.
+      injection H4; clear H4; intros; subst.
+      pose proof (H2 (S i)).
+      rewrite <- H5 in H.
+      inversion H.
+    }
+    rewrite Hi in H4.
+    injection H4; clear H4; intros; subst.
+    eapply (Hind (ps1 ++ [(pc, pri)], c)) with (trace:=fun j => trace (j + S i)).
+    + constructor.
+      * econstructor.
+        -- apply H0.
+        -- apply H1.
+      * econstructor.
+        -- rewrite <- app_assoc.
+           apply H6.
+        -- apply Forall_app.
+           split.
+           ++ apply H1.
+           ++ constructor; [|constructor].
+              rewrite Hi in Hstate_inv.
+              inversion Hstate_inv; clear Hstate_inv; subst.
+              apply H7.
+    + reflexivity.
+    + rewrite <- app_assoc.
+      apply H6.
+    + apply Forall_app.
+      split.
+      * apply H1.
+      * constructor; [|constructor].
+        rewrite Hi in Hstate_inv.
+        inversion Hstate_inv; clear Hstate_inv; subst.
+        apply H7.
+    + intros.
+      apply H2.
+    + simpl.
+      congruence.
+  - apply diverges_intro with (1:=H0) (2:=H1).
+    
