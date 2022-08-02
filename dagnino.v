@@ -582,3 +582,126 @@ Proof.
     }
     econstructor; eassumption.
 Qed.
+
+Require Import ClassicalChoice.
+
+Lemma rtc_f s0 sn:
+  rtc step s0 sn ->
+  exists n f,
+  f 0 = s0 /\
+  f n = sn /\
+  forall i,
+  i < n ->
+  step (f i) (f (S i)).
+Proof.
+  induction 1.
+  - exists 0.
+    exists (fun _ => x).
+    split. reflexivity.
+    split. reflexivity.
+    intros.
+    lia.
+  - destruct IHrtc as [n [f [? [? ?]]]].
+    exists (S n).
+    exists (fun n => match n with O => x | S i => f i end).
+    split. reflexivity.
+    split. assumption.
+    intros.
+    destruct i.
+    + rewrite H1.
+      assumption.
+    + apply H3.
+      lia.
+Qed.
+
+Require Import Wf_nat.
+Require Import Recdef.
+
+Function trace_of_seqs(f: state -> nat * (nat -> state))(s: state)(i: nat) {wf lt i}: state :=
+  let (n_s, trace_s) := f s in
+  match i with
+    O => s
+  | S i =>
+    if Nat.ltb i n_s then
+      trace_s i
+    else
+      trace_of_seqs f (trace_s n_s) (i - n_s)
+  end.
+Proof.
+  - intros.
+    lia.
+  - apply lt_wf.
+Qed.
+
+Require Import ClassicalEpsilon.
+
+Lemma trace_intro (P: state -> Prop):
+  (forall s0, P s0 -> exists s1 sN, step s0 s1 /\ rtc step s1 sN /\ P sN) ->
+  forall s0,
+  P s0 ->
+  exists trace,
+  (forall i, step (trace i) (trace (S i))) /\
+  trace 0 = s0.
+Proof.
+  intros H.
+  assert (forall s0, exists n_f, P s0 -> match n_f with (n, f) => f 0 = s0 /\ P (f (S n)) /\ forall i, i <= n -> step (f i) (f (S i)) end). {
+    intros.
+    destruct (classic (P s0)).
+    - destruct (H s0 H0) as [s1 [sN [? [? ?]]]].
+      apply rtc_f in H2.
+      destruct H2 as [n [f [? [? ?]]]].
+      exists (n, fun i => match i with O => s0 | S i => f i end).
+      intros.
+      split. reflexivity.
+      split. rewrite H4. assumption.
+      intros.
+      destruct i.
+      + rewrite H2.
+        assumption.
+      + apply H5.
+        lia.
+    - exists (O, fun _ => s0).
+      intros.
+      elim (H0 H1).
+  }
+  clear H.
+  apply choice in H0.
+  destruct H0 as [f Hf].
+  intros.
+  exists (trace_of_seqs f s0).
+  split.
+  - intro i.
+    revert s0 H.
+    apply lt_wf_ind with (n:=i) (P:=fun i => forall s, P s -> step (trace_of_seqs f s i) (trace_of_seqs f s (S i))).
+    intros.
+    destruct n.
+    + unfold trace_of_seqs.
+      case_eq (trace_of_seqs_terminate f s 0); intros.
+      rewrite H1.
+
+Qed.
+
+CoInductive div: state -> Prop :=
+| div_intro s0 s1:
+  step s0 s1 ->
+  div s1 ->
+  div s0.
+
+Lemma diverges_step_lemma c k:
+  diverges c ->
+  div (c, None, k).
+Proof.
+  revert c k.
+  cofix Hcofix.
+  intros.
+  inversion H; clear H; subst.
+  destruct ps0 as [|[pc0 pr0] ps0'].
+  - simpl in H0.
+    econstructor.
+    eapply step_enter. eassumption.
+    apply Hcofix.
+    assumption.
+  - simpl in H0.
+    econstructor.
+    eapply step_enter. eassumption.
+    
