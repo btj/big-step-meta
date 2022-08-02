@@ -473,24 +473,16 @@ Parameter rule_prefix_lt_wf: well_founded rule_prefix_lt.
 
 Require Export Classical.
 
-CoInductive stream: Type := | scons(x: list nat)(s: stream).
-
-CoFixpoint lists(n: nat): stream :=
-  
-    (fix iter(i: nat)(l: list nat): stream :=
-    match i with
-      O => scons l (lists n)
-    | S i => iter i (i::l)
-    end) n [].
-
-Theorem step_diverges c trace:
-  (forall i, step (trace i) (trace (S i))) ->
-  trace 0 = (c, None, []) ->
+Theorem step_diverges c:
+  (exists trace,
+  (forall i, step (trace i) (trace (S i))) /\
+  trace 0 = (c, None, [])) ->
   diverges c.
 Proof.
-  revert c trace.
-  cofix Hcofix.
+  revert c.
+  apply diverges_lemma.
   intros.
+  destruct H as [trace [? ?]].
   pose proof (H 0).
   rewrite H0 in H1.
   inversion H1; clear H1; subst. {
@@ -506,7 +498,11 @@ Proof.
     forall trace,
     (forall i, step (trace i) (trace (S i))) ->
     trace O = (pc, None, [(ps1, c)]) ->
-    diverges c)) with (trace:=fun i => trace (S i)) (ps1:=[]) (pc:=pc) (pr:=pr) (r:=r) (ps2:=ps) (a:=([], c)); try tauto.
+    exists pc0,
+      (exists trace',
+       (forall i, step (trace' i) (trace' (S i))) /\
+       trace' 0 = (pc0, None, [])) /\
+      diverges_rule pc0 c)) with (trace:=fun i => trace (S i)) (ps1:=[]) (pc:=pc) (pr:=pr) (r:=r) (ps2:=ps) (a:=([], c)); try tauto.
   2:{ constructor. }
   2:{ intros; apply H. }
   2:{ rewrite <- H5. reflexivity. }
@@ -574,12 +570,15 @@ Proof.
       apply H2.
     + simpl.
       congruence.
-  - apply diverges_intro with (1:=H0) (2:=H1).
+  - exists pc.
     destruct (trace_remove_context_suffix (c0:=pc) (or0:=None) (k:=[(ps1, c)]) (c:=pc) (k0:=[]) H2) as [trace' [? ?]]. {
       assumption.
     } {
       reflexivity.
     } { assumption. }
-    apply Hcofix with (trace:=trace'); assumption.
+    split. {
+      exists trace'.
+      tauto.
+    }
+    econstructor; eassumption.
 Qed.
-
