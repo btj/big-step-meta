@@ -614,26 +614,14 @@ Proof.
       lia.
 Qed.
 
-Require Import Wf_nat.
-Require Import Recdef.
-
-Function trace_of_seqs(f: state -> nat * (nat -> state))(s: state)(i: nat) {wf lt i}: state :=
-  let (n_s, trace_s) := f s in
-  match i with
-    O => s
-  | S i =>
-    if Nat.ltb i n_s then
-      trace_s i
-    else
-      trace_of_seqs f (trace_s n_s) (i - n_s)
+Fixpoint concat_seqs(f: state -> nat * (nat -> state))(s0: state)(k: nat) {struct k}: nat * (nat -> state) :=
+  match k with
+    O => let (n, seq) := f s0 in (S n, seq)
+  | S k0 =>
+    let (m, trace) := concat_seqs f s0 k0 in
+    let (n, seq) := f (trace m) in
+    (m + S n, fun i => if Nat.ltb i m then trace i else seq (i - m))
   end.
-Proof.
-  - intros.
-    lia.
-  - apply lt_wf.
-Qed.
-
-Require Import ClassicalEpsilon.
 
 Lemma trace_intro (P: state -> Prop):
   (forall s0, P s0 -> exists s1 sN, step s0 s1 /\ rtc step s1 sN /\ P sN) ->
@@ -667,41 +655,183 @@ Proof.
   clear H.
   apply choice in H0.
   destruct H0 as [f Hf].
-  intros.
-  exists (trace_of_seqs f s0).
+  intros s0 Hs0.
+  assert (Hfst: forall k0, forall k1, k1 + fst (concat_seqs f s0 k0) <= fst (concat_seqs f s0 (k1 + k0))). {
+    intros k0.
+    induction k1.
+    - simpl.
+      lia.
+    - simpl.
+      case_eq (concat_seqs f s0 (k1 + k0)); intros.
+      case_eq (f (s n)); intros.
+      simpl.
+      rewrite H in IHk1.
+      simpl in IHk1.
+      lia.
+  }
+  assert (HP: forall k, let (m, trace) := concat_seqs f s0 k in P (trace m)). {
+    induction k.
+    - simpl.
+      case_eq (f s0); intros n seq Hfs0.
+      pose proof (Hf s0 Hs0).
+      rewrite Hfs0 in H.
+      destruct H as [? [? ?]].
+      assumption.
+    - simpl.
+      case_eq (concat_seqs f s0 k); intros m trace Hmtrace.
+      case_eq (f (trace m)); intros n seq Hnseq.
+      case_eq (Nat.ltb (m + S n) m); intros.
+      + rewrite PeanoNat.Nat.ltb_lt in H.
+        lia.
+      + assert (m + S n - m = S n). lia. rewrite H0.
+        rewrite Hmtrace in IHk.
+        pose proof (Hf (trace m) IHk).
+        rewrite Hnseq in H1.
+        tauto.
+  }
+  assert (Hsnd: forall k0, forall k1, forall i, i <= fst (concat_seqs f s0 k0) -> snd (concat_seqs f s0 (k1 + k0)) i = snd (concat_seqs f s0 k0) i). {
+    intro k0.
+    induction k1.
+    - intros.
+      reflexivity.
+    - intros.
+      simpl.
+      rewrite <- IHk1 with (1:=H).
+      case_eq (concat_seqs f s0 (k1 + k0)); intros.
+      case_eq (f (s n)); intros.
+      simpl.
+      case_eq (Nat.ltb i n); intros.
+      + reflexivity.
+      + apply PeanoNat.Nat.ltb_ge in H2.
+        pose proof (Hfst k0 k1).
+        rewrite H0 in H3.
+        simpl in H3.
+        assert (i = n). lia.
+        subst.
+        assert (n - n = 0). lia. rewrite H4.
+        pose proof (HP (k1 + k0)).
+        rewrite H0 in H5.
+        pose proof (Hf (s n) H5).
+        rewrite H1 in H6.
+        tauto.
+  }
+  assert (Hf_step: forall k, let (m, trace) := concat_seqs f s0 k in forall i, i < m -> step (trace i) (trace (S i))). {
+    induction k.
+    - simpl.
+      case_eq (f s0); intros n seq Hnseq.
+      intros.
+      pose proof (Hf s0 Hs0).
+      rewrite Hnseq in H0.
+      destruct H0 as [? [? ?]].
+      apply H2.
+      lia.
+    - simpl.
+      case_eq (concat_seqs f s0 k); intros m trace Hmtrace.
+      rewrite Hmtrace in IHk.
+      case_eq (f (trace m)); intros n seq Hnseq.
+      intros.
+      case_eq (Nat.ltb i m); intros.
+      + rewrite PeanoNat.Nat.ltb_lt in H0.
+        case_eq (Nat.ltb (S i) m); intros.
+        * rewrite PeanoNat.Nat.ltb_lt in H1.
+          apply IHk.
+          lia.
+        * rewrite PeanoNat.Nat.ltb_ge in H1.
+          assert (m = S i). lia. rewrite H2.
+          assert (S i - S i = 0). lia. rewrite H3.
+          pose proof (HP k).
+          rewrite Hmtrace in H4.
+          pose proof (Hf (trace m) H4).
+          rewrite Hnseq in H5.
+          destruct H5 as [? [? ?]].
+          rewrite H5.
+          subst.
+          apply IHk.
+          assumption.
+      + rewrite PeanoNat.Nat.ltb_ge in H0.
+        case_eq (Nat.ltb (S i) m); intros.
+        * rewrite PeanoNat.Nat.ltb_lt in H1.
+          lia.
+        * rewrite PeanoNat.Nat.ltb_ge in H1.
+          pose proof (HP k).
+          rewrite Hmtrace in H2.
+          pose proof (Hf (trace m) H2).
+          rewrite Hnseq in H3.
+          destruct H3 as [? [? ?]].
+          assert (S i - m = S (i - m)). lia. rewrite H6.
+          apply H5.
+          lia.
+  }
+  exists (fun i => snd (concat_seqs f s0 i) i).
   split.
-  - intro i.
-    revert s0 H.
-    apply lt_wf_ind with (n:=i) (P:=fun i => forall s, P s -> step (trace_of_seqs f s i) (trace_of_seqs f s (S i))).
-    intros.
-    destruct n.
-    + unfold trace_of_seqs.
-      case_eq (trace_of_seqs_terminate f s 0); intros.
-      rewrite H1.
-
+  - intros.
+    pose proof (Hsnd i 1 (S i)).
+    assert (1 + i = S i). reflexivity. rewrite H0 in H.
+    rewrite H. 2:{
+      pose proof (Hfst 0 i).
+      case_eq (concat_seqs f s0 0); intros m trace Hmtrace.
+      rewrite Hmtrace in H1.
+      assert (i + 0 = i). lia. rewrite H2 in H1.
+      case_eq (concat_seqs f s0 i); intros mi tracei Hmtracei.
+      rewrite Hmtracei in H1.
+      simpl in H1.
+      simpl.
+      simpl in Hmtrace.
+      case_eq (f s0); intros n seq Hnseq.
+      rewrite Hnseq in Hmtrace.
+      injection Hmtrace; clear Hmtrace; intros; subst.
+      lia.
+    }
+    case_eq (concat_seqs f s0 i); intros m trace Hmtrace.
+    pose proof (Hf_step i).
+    rewrite Hmtrace in H1.
+    apply H1.
+    pose proof (Hfst 0 i).
+    assert (i + 0 = i). lia. rewrite H3 in H2.
+    rewrite Hmtrace in H2.
+    simpl in H2.
+    case_eq (f s0); intros n seq Hnseq.
+    rewrite Hnseq in H2.
+    simpl in H2.
+    lia.
+  - simpl.
+    case_eq (f s0); intros n seq Hnseq.
+    simpl.
+    pose proof (Hf s0 Hs0).
+    rewrite Hnseq in H.
+    tauto.
 Qed.
 
-CoInductive div: state -> Prop :=
-| div_intro s0 s1:
-  step s0 s1 ->
-  div s1 ->
-  div s0.
-
-Lemma diverges_step_lemma c k:
+Lemma diverges_step_lemma c:
   diverges c ->
-  div (c, None, k).
+  exists trace,
+  (forall i, step (trace i) (trace (S i))) /\
+  trace 0 = (c, None, []).
 Proof.
-  revert c k.
-  cofix Hcofix.
+  intro Hc.
+  apply trace_intro with (P:=fun state => exists c k, state = (c, None, k) /\ diverges c).
+  2:{
+    exists c.
+    exists [].
+    tauto.
+  }
   intros.
+  clear c Hc.
+  destruct H as [c [k [Hs0 H]]].
   inversion H; clear H; subst.
   destruct ps0 as [|[pc0 pr0] ps0'].
   - simpl in H0.
-    econstructor.
-    eapply step_enter. eassumption.
-    apply Hcofix.
+    eexists.
+    eexists.
+    split. {
+      eapply step_enter. eassumption.
+    }
+    split. apply rtc_refl.
+    eexists; eexists.
+    split. reflexivity.
     assumption.
   - simpl in H0.
-    econstructor.
+    exists (pc0, None, ([], pc0)::k).
+    
     eapply step_enter. eassumption.
     
